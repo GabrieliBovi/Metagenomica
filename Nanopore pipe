@@ -1,0 +1,215 @@
+## No Python. ---
+#1. Instalar Dependências
+#pip install NanoPlot NanoStat NanoFilt
+#pip install matplotlib seaborn pandas
+
+#2. Importar Bibliotecas
+import os
+import subprocess
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+#3. Configurar Diretórios
+# Diretório contendo as amostras
+base = r"CB_nanopore"
+input_dir = os.path.join(base,"raw")
+output_dir = os.path.join(base,"analise")
+trimmed_dir = os.path.join(base, "trimagem_q7_cut17_min100")
+tabelas = os.path.join(base, "tabelas")
+figuras = os.path.join(base, "figuras")
+trimmed_analise = os.path.join(base, "analise_trimagem")
+
+# Criar diretórios de saída, se necessário
+os.makedirs(base, exist_ok=True)
+os.makedirs(output_dir, exist_ok=True)
+os.makedirs(trimmed_dir, exist_ok=True)
+os.makedirs(tabelas, exist_ok=True)
+os.makedirs(figuras, exist_ok=True)
+os.makedirs(trimmed_analise, exist_ok=True)
+
+# Listar arquivos FASTQ
+fastq_files = [os.path.join(input_dir, f) 
+               for f in os.listdir(input_dir) 
+               if f.endswith(".fastq.gz")]
+print(f"Arquivos encontrados: {fastq_files}")
+
+
+## 4. Avaliar a Qualidade. NanoPlo, NanoStat, FASTQC e NanoComp (escolher o melhor para usar)
+# Função para rodar NanoPlot e NanoStat em cada arquivo
+def analyze_quality(fastq_files, output_dir):
+    for fastq in fastq_files:
+        sample_name = os.path.basename(fastq).replace(".fastq.gz", "")
+        sample_output_dir = os.path.join(output_dir, sample_name)
+        os.makedirs(sample_output_dir, exist_ok=True)
+        
+        # NanoPlot
+        subprocess.run([
+            "NanoPlot",
+            "--fastq", fastq,
+            "--loglength",
+            "--N50",
+            "--title", f"{sample_name} Quality Report",
+            "-o", sample_output_dir
+        ])
+        
+        # NanoStat
+        stats_output = os.path.join(sample_output_dir, f"{sample_name}_NanoStat.txt")
+        with open(stats_output, "w") as stats_file:
+            subprocess.run([
+                "NanoStat",
+                "--fastq", fastq
+            ], stdout=stats_file)
+
+# Executar análise de qualidade
+analyze_quality(fastq_files, output_dir)
+
+## FASTQC
+# sudo apt-get install fastqc
+# Função para rodar FastQC em arquivos FASTQ
+def run_fastqc(fastq_files, output_dir):
+    for fastq in fastq_files:
+        subprocess.run([
+            "fastqc",  # Chama o FastQC
+            "--outdir", output_dir,  # Define o diretório de saída
+            fastq  # Caminho do arquivo FASTQ
+        ])
+
+run_fastqc(fastq_files, output_dir)
+
+### NanoComp -no terminal? - Gera os mesmos resultados de NanoStat, mas em uma tabela com todas as amostras. NanoPlot tem alguns graficos diferentes do NanoComp.
+#pip install NanoComp
+
+NanoComp --fastq ./raw/*.fastq --outdir ./analise --plot violin
+
+
+## 5. Realizar Trimagem (NanoFilt)
+import subprocess
+import os
+import gzip
+from Bio import SeqIO
+
+with gzip.open("CB_nanopore/raw/CB2.fastq.gz", "rt") as fq:
+    for record in SeqIO.parse(fq, "fastq"):
+        print(record)
+def trim_reads(fastq_files, trimmed_dir, qscore_cutoff=7, headcrop=17, tailcrop=10, min_length=100):
+    for fastq in fastq_files:
+        sample_name = os.path.basename(fastq).replace(".fastq.gz", "").replace(".fastq", "")
+        uncompressed_fastq = os.path.join(trimmed_dir, f"{sample_name}_uncompressed.fastq")
+        trimmed_file = os.path.join(trimmed_dir, f"{sample_name}_trimmed.fastq")
+
+        # Descomprimir antes de processar
+        if fastq.endswith(".gz"):
+            with gzip.open(fastq, "rt") as f_in, open(uncompressed_fastq, "w") as f_out:
+                f_out.write(f_in.read())
+            fastq = uncompressed_fastq  # Atualiza para usar o arquivo descomprimido
+
+        args = ["NanoFilt", "--quality", str(qscore_cutoff)]
+        if min_length:
+            args += ["-l", str(min_length)]
+        if headcrop:
+            args += ["--headcrop", str(headcrop)]
+        if tailcrop:
+            args += ["--tailcrop", str(tailcrop)]
+
+        with open(trimmed_file, "w") as output_trimmed:
+            result = subprocess.run(args, stdin=open(fastq, "r"), stdout=output_trimmed, stderr=subprocess.PIPE)
+            
+            if result.returncode != 0:
+                print(f"Erro ao executar NanoFilt para {fastq}: {result.stderr.decode()}")
+            else:
+                print(f"Trimagem realizada para {fastq}, saída em {trimmed_file}")
+
+# Realizar trimagem
+trim_reads(fastq_files, trimmed_dir, qscore_cutoff=7, min_length=100, headcrop=17, tailcrop=10)
+
+
+## 6. Analisar Dados Pós-Trimagem
+# Listar arquivos FASTQ
+trimmed_files = [os.path.join(trimmed_dir, f) 
+               for f in os.listdir(trimmed_dir) 
+               if f.endswith(".fastq")]
+print(f"Arquivos encontrados: {trimmed_files}")
+
+# FastQC 
+# Função para rodar FastQC em arquivos FASTQ
+def run_fastqc(trimmed_files, trimmed_analise):
+    for fastq in trimmed_files:
+        subprocess.run([
+            "fastqc",  # Chama o FastQC
+            "--outdir", trimmed_analise,  # Define o diretório de saída
+            fastq  # Caminho do arquivo FASTQ
+        ])
+
+run_fastqc(trimmed_files, trimmed_analise)
+
+# NanoComp - terminal
+NanoComp --fastq ./trimagem/*.fastq --outdir ./analise_trimagem --plot violin
+
+
+## No R. ---
+library(stats)
+.cran_packages <- c("tidyverse","knitr","BiocStyle","ggplot2", "gridExtra")
+.bioc_packages <- c("dada2", "phyloseq", "DECIPHER")
+sapply(c(.cran_packages, .bioc_packages), require, character.only = TRUE)
+library(Biostrings)
+library(taxize)
+library(ShortRead)
+
+# Definição dos diretórios
+filter_folder <- "/Users/LS28_Seq/Documents/raw_CB_nanopore/CB_nanopore/trimagem_q9_cut17_min100"
+intermediate_folder <- "/Users/LS28_Seq/Documents/raw_CB_nanopore/CB_nanopore/inter_files"
+
+dir.create(filter_folder, showWarnings = FALSE)
+dir.create(intermediate_folder, showWarnings = FALSE)
+
+# Lista de amostras e arquivos
+sample_names <- c("CB1", "CB2") # "CB1", "CB2", "CB3", "CB4",  "CB7", "CB8", "CB9"
+
+fnFiles <- file.path(filter_folder, paste0(sample_names, "_trimmed.fastq"))
+
+# Carrega as sequências processadas
+seqs <- getSequences(fnFiles)  
+
+# Converter FASTQ para FASTA
+convert_fastq_to_fasta <- function(fastq_file) {
+  fq <- readFastq(fastq_file)  # Lê o FASTQ
+  seqs <- sread(fq)  # Extrai as sequências
+  
+  # Define o nome do arquivo de saída (FASTA)
+  fasta_file <- sub(".fastq", ".fasta", fastq_file)
+  
+  # Salva como FASTA
+  writeXStringSet(seqs, fasta_file, format="fasta")
+  return(fasta_file)
+}
+
+# Aplicar a conversão em todos os arquivos
+fasta_files <- sapply(fnFiles, convert_fastq_to_fasta)
+
+# Cria um conjunto de sequências DNAStringSet
+seqs <- readDNAStringSet(fasta_files)
+
+# Carrega o banco de dados treinado do SILVA
+load("/Users/LS28_Seq/Documents/SILVA_SSU_r138_2019.RData")  
+
+# Atribui taxonomia usando SILVA e Extrai a taxonomia formatada
+library(parallel) # ou só usar 8 processors
+num_cores <- detectCores() - 1
+ids <- IdTaxa(seqs, trainingSet, strand="top", processors=num_cores, verbose=TRUE)
+
+ranks <- c("domain","phylum","class","order","family","genus","species")
+taxid_silva <- t(sapply(ids, function(x) {
+  m <- match(ranks, x$rank)
+  taxa <- x$taxon[m]
+  taxa[startsWith(taxa, "unclassified_")] <- NA  # Remove classificações não resolvidas
+  taxa
+}))
+colnames(taxid_silva) <- ranks
+rownames(taxid_silva) <- getSequences(fnFiles)
+
+# Salva os resultados
+saveRDS(taxid_silva, file=paste0(intermediate_folder, "/ps_silva.rds"))
+
+## pipe ainda nao terminou, mas precisa testar o silva primeiro .....
+
