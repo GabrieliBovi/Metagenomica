@@ -1,3 +1,5 @@
+# Criar conta no shiny - https://shiny.posit.co/
+
 library(shiny)
 library(tidyverse)
 library(phyloseq)
@@ -221,3 +223,11 @@ server <- function(input, output) {
 }
 
 shinyApp(ui = ui, server = server)
+
+# Para publicar no shinyapps.io, basta rodar o seguinte comando no RStudio (após ter criado uma conta):
+install.packages("rsconnect")
+library(rsconnect)
+# conectar a conta
+rsconnect::setAccountInfo(name='your_name', token='your_token', secret='your_secret')
+rsconnect::deployApp('caminho/do/seu/arquivo/app.R')
+
